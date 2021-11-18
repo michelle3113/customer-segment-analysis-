@@ -1,0 +1,1282 @@
+---
+title: "Final_Report: Customer Segmentation via Cluster Analysis"
+author: "WEI Zhen; ZHU Difei; YUAN Siqin; Wu qiuyan"
+date: "2021/11/3"
+output: 
+  html_document:
+    toc: TRUE
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+***
+
+## 0 Backgroud | Problem Statement
+
+The core of marketing is to create value for customers, meet customer needs, and on this basis to create profits for enterprises.
+
+Understanding the personalities of companies’ prospects and customers can help companies sell more products and services. It can also give companies a competitive edge in the market.
+
+Although the types of products and services within an industry may evolve over the years, personalities of their audience stay pretty much the same. This is why enterprises should focus more attention on their buyers than they may realize.
+
+Customer Personality Analysis is a detailed analysis of a company’s ideal customers. It helps a business to better understand its customers and makes it easier for them to modify products according to the specific needs, behaviors and concerns of different types of customers.
+
+Customer personality analysis helps a business to modify its product based on its target customers from different types of customer segments. For example, instead of spending money to market a new product to every customer in the company’s database, a company can analyze which customer segment is most likely to buy the product and then market the product only on that particular segment.
+
+In the context of customer segmentation, cluster analysis uses mathematical models to find groups of similar customers, based on finding the minimum differences between customers within each group. These homogeneous groups, called "Customer archetypes" or "Personas," precisely target customers for more effective customer marketing through personalization. The goal of cluster analysis in marketing is to accurately segment customers in order to achieve more effective customer marketing via personalization.
+
+The specific problem that we are interested in is: how to obtain Customer archetypes according to customer' personal data and consumption data through clustering, so as to achieve better data marketing in subsequent corporate activities.
+
+
+***
+
+
+## 1 Introduction
+### 1.1 Loda libraries
+
+```{r load the library}
+library(tidyverse)
+library(lubridate)
+library(devtools)
+
+#For Visualization
+library(ggplot2)
+library(corrplot)
+library(RColorBrewer)
+library(plotly)
+library(reticulate)
+library(RColorBrewer)
+library(scales)
+library(cowplot)
+
+#For Correlation
+library(arules)
+library(arulesViz)
+library(rfm)
+
+#For PCA
+library(FactoMineR)
+library(factoextra)
+
+#For Cluster
+library(purrr)
+library(fpc)
+library(effects)
+library(cluster)
+library(vegan)
+library(NbClust)
+library(flexclust)
+library(magrittr)
+```
+
+  
+```{r choose the visualization color}
+display.brewer.all(type = "all")
+brewer.pal.info
+show_col(brewer.pal(9, "GnBu"))
+```
+
+  
+### 1.2 Import the data
+```{r import the data & define the data structrue}
+df <- read_csv(
+  file = "/Users/zhudifei/Documents/数据分析编程/marketing_campaign.csv",
+  col_types = cols(
+    .default = col_integer(),
+    Education = col_character(),
+    Marital_Status = col_character(),
+    Dt_Customer = col_date(format = "%d-%m-%Y")
+  )
+)
+```
+
+```{r rename the misleading field name }
+#df <- rename(df, Response = "Response+A1")
+```
+
+```{r glimpse the data to see whether the data structure definition and rename operation works}
+glimpse(df)
+```
+
+### 1.3 Data Description
+```{r}
+head(df)
+```
+```{r }
+dim(df)
+```
+
+The original data set has 2240 observations and 29 columns.
+
+
+### 1,4 Interpretion of the variables
+
+The original data is divided into four parts, including 
+1. the personal data of customers
+2. the product data purchased by customers
+3. data on user attitudes towards marketing campaigns
+4. customer purchase channel data
+
+* People
+  + ID: Customer's unique identifier
+  + Year_Birth: Customer's birth year
+  + Education: Customer's education level
+  + Marital_Status: Customer's marital status
+  + Income: Customer's yearly household income
+  + Kidhome: Number of children in customer's household
+  + Teenhome: Number of teenagers in customer's household
+  + Dt_Customer: Date of customer's enrollment with the company
+  + Recency: Number of days since customer's last purchase
+  + Complain: 1 if customer complained in the last 2 years, 0 otherwise
+
+* Products
+  + MntWines: Amount spent on wine in last 2 years
+  + MntFruits: Amount spent on fruits in last 2 years
+  + MntMeatProducts: Amount spent on meat in last 2 years
+  + MntFishProducts: Amount spent on fish in last 2 years
+  + MntSweetProducts: Amount spent on sweets in last 2 years
+  + MntGoldProds: Amount spent on gold in last 2 years
+
+* Promotion
+  + NumDealsPurchases: Number of purchases made with a discount
+  + AcceptedCmp1: 1 if customer accepted the offer in the 1st campaign, 0 otherwise
+  + AcceptedCmp2: 1 if customer accepted the offer in the 2nd campaign, 0 otherwise
+  + AcceptedCmp3: 1 if customer accepted the offer in the 3rd campaign, 0 otherwise
+  + AcceptedCmp4: 1 if customer accepted the offer in the 4th campaign, 0 otherwise
+  + AcceptedCmp5: 1 if customer accepted the offer in the 5th campaign, 0 otherwise
+  + Response: 1 if customer accepted the offer in the last campaign, 0 otherwise
+
+* Place
+  + NumWebPurchases: Number of purchases made through the company’s web site
+  + NumCatalogPurchases: Number of purchases made using a catalogue
+  + NumStorePurchases: Number of purchases made directly in stores
+  + NumWebVisitsMonth: Number of visits to company’s web site in the last month  
+
+
+***
+
+  
+## 2 Exploratory Data Analysis
+### 2.1 Data pre-processing
+
+On the basis of understanding the meaning of data set variables, we preprocess data in eight parts.
+
+1. Identify how many features there are, which are continuous and which are categorical.
+2. Characteristics are renamed for ease of data processing.
+3. Based on the understanding of the meaning of variables, we transform the variables and generate new variables based on subsequent analysis. 
+4. Check for missing values and make up or remove the missing values to make the data complete.
+5. Detect and remove outliers.
+6. The continuous numerical features are normalized and centralized so that the mean is 0 and the variance is 1.
+7. Encodes the characteristics of the category type.
+8. Binarization of continuous data that needs to be converted to categorical data.
+
+#### 2.1.1 Engineer new features
+
+```{r}
+# See different values in categorical variable
+
+unique(df$Marital_Status)
+unique(df$Education)
+```
+
+We find that the type of customer marital status is a bit strange, but only four lines are involved, so we deleted those two states——"YOLO" and "Absurb".
+
+```{r}
+# See the proportion of values with ambiguous meanings
+
+df[df$Marital_Status %in% c("YOLO","Absurd"),]
+```
+
+```{r}
+# Feature Engineering including change categorical to dummy/numerical variables
+
+df <- 
+  df %>%
+  mutate(age = 2021 - Year_Birth) %>%
+  mutate(Education_classify = case_when(
+    Education == "PhD" ~ "high-level",
+    Education == "Master" ~ "high-level",
+    Education == "Graduation" ~ "high-level",
+    Education == "Basic" ~ "low-level",
+    Education == "2n Cycle" ~ "low-level"
+                                        )
+         ) %>%
+  mutate(Education_D = case_when(
+    Education_classify == "high-level" ~ 1,
+    Education_classify == "low-level" ~ 0
+                                 )
+         ) %>%
+  mutate(marriage = case_when(Marital_Status == "Single" ~ 1,
+                              Marital_Status == "Together" ~ 2,
+                              Marital_Status == "Married" ~ 2,
+                              Marital_Status == "Divorced" ~ 1,
+                              Marital_Status == "Widow" ~ 1,
+                              Marital_Status == "Alone" ~ 1
+                              )
+         ) %>%
+  mutate(children_home = Kidhome + Teenhome) %>%
+  mutate(family_size = marriage + Kidhome + Teenhome) %>%
+  mutate(total_spending = MntWines + MntFruits + 
+           MntMeatProducts + MntFishProducts +
+           MntSweetProducts + MntGoldProds
+         ) %>%
+  mutate(total_accepted = AcceptedCmp1 + AcceptedCmp2 + 
+           AcceptedCmp3 + AcceptedCmp4 +
+           AcceptedCmp5 + Response) %>%
+  mutate(total_purchase = NumWebPurchases + NumCatalogPurchases + NumStorePurchases) %>%
+  mutate(customer_reg_days = today() - Dt_Customer)
+
+df$customer_reg_days <- as.numeric(df$customer_reg_days)
+```
+
+
+#### 2.1.2 Interpretion of the new features
+
+**Why do we construct these features?**
+* People
+  + age: Transform the year_birth to age for the following analysis.
+  + Education_classify: Transition variables. The types of education in the original data are complicated. For the convenience of analysis, "PhD", "master" and "graduation" are classified as "high level", and "basic" and "2N Cycle" are classified as "low level".
+  + Education_D: 1 if customer's education_classify is "high_level", 0 otherwise.
+  + marriage: Customer marital status. 2 if customer is "married" or "together", 1 otherwise.
+  + family_size: The total number of people in a family. It is an important analysis indicator. 
+  + children_home: The total number of children in a family. there might be some correlation between the number of children and the products consumed by the household.
+  + costumer_reg_days: Transform Dt_customer(the date the customer register) to the registered number of days for following analysis.
+
+* Products
+  + total_spending: The customer's total spending on six items,  it is our key measure of high-value customers.
+
+* Promotion
+  + total_accepted: Number of purchases made with a discount.
+
+* Place
+  + total_purchase: Number of purchases of the customer in last 2 years.
+
+
+#### 2.1.3 Drop the useless features
+```{r}
+# We drop variables from the new data frame that we thought were meaningless for subsequent analysis
+
+# We drop the variable Z_costContact and Z_Revenue because they're same across the whole data
+
+df_new <- 
+  df %>%
+  select(-Year_Birth,-Education_classify,-Marital_Status,
+         -Dt_Customer,-NumWebVisitsMonth,-Z_CostContact,-Z_Revenue
+)
+```
+
+
+#### 2.1.4 Handle with the missing values
+```{r missing values}
+colSums(is.na(df_new))
+```
+
+According to the above results, only income、marriage and family_size columns have missing values. We can easily see that the missing values for the aarriage and family_size columns are due to the fact that we did not assign values to the ambiguous four rows of data ("YOLO" and "Absurb"). The 24 missing values of Income should be caused by data collection.
+In the next step we remove the missing values.
+
+```{r remove the missing value}
+df_new <- na.omit(df_new)
+dim(df_new)
+```
+After removing the NA values, the data set has 2212 observations and 32 columns.
+
+```{r}
+length(unique(df_new$ID))
+```
+
+Customers are identified by their ID, as can be seen from above, the ID of each observation is unique, so each row represents one customer.
+
+#### 2.1.5 Handle with the outliers
+
+```{r visualize outliers through boxplot}
+p1 <- df_new %>%
+  ggplot() +
+  geom_boxplot(mapping = aes(x = age), 
+               fill = brewer.pal(9,"GnBu")[4], 
+               outlier.colour = brewer.pal(9,'Reds')[6]
+               ) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+  
+p2 <- df_new %>%
+  ggplot() +
+  geom_boxplot(mapping = aes(x = Income), 
+               fill = brewer.pal(9,"GnBu")[5], 
+               outlier.colour = brewer.pal(9,'Reds')[6]) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+p3 <- df_new %>%
+  ggplot() +
+  geom_boxplot(mapping = aes(x = total_spending), 
+               fill = brewer.pal(9,"GnBu")[6], 
+               outlier.colour = brewer.pal(9,'Reds')[6])  +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+p4 <- df_new %>%
+  ggplot() +
+  geom_boxplot(mapping = aes(x = total_purchase), 
+               fill = brewer.pal(9,"GnBu")[7], 
+               outlier.colour = brewer.pal(9,'Reds')[6]) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+p5 <- df_new %>%
+  ggplot() +
+  geom_boxplot(mapping = aes(x = customer_reg_days), 
+               fill = brewer.pal(9,"GnBu")[8], 
+               outlier.colour = brewer.pal(9,'Reds')[6]) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+cowplot::plot_grid( p1, p2, p3, p4, p5, nrow = 2
+                    #, labels = LETTERS[1:5]
+                   )
+```
+
+An outlier is a value or an observation that is distant from other observations, that is to say, a data point that differs significantly from other data points. 
+
+It can be found from the box plot that there are outliers in variables: age, income, spending, which need to be discarded in the subsequent analysis according to the situation  
+
+Our data set have thousands observations and it is important to have a numerical cut-off that differentiates an outlier from a non-outlier.
+
+```{r find outliers statistically}
+# using the quantile() function to find the 25th and the 75th percentile of the dataset
+Q_age <- quantile(df_new$age, probs=c(.25, .75), na.rm = FALSE)
+Q_income <- quantile(df_new$Income, probs=c(.25, .75), na.rm = FALSE)
+
+# using the IQR() function which gives me the difference of the 75th and 25th percentiles.
+IQR_age <- IQR(df_new$age)
+IQR_income <- IQR(df_new$Income)
+
+# find the cut-off ranges beyond which all data points are outliers.
+up_age <-  Q_age[2]+1.5 * IQR_age # Upper Range  
+low_age <- Q_age[1]-1.5 * IQR_age # Lower Range
+
+up_income <- Q_income[2] + 1.5 * IQR_income # Upper Range 
+low_income <- Q_income[1] - 1.5 * IQR_income # Lower Range
+
+# extract the part of our dataset between the upper and lower ranges, leaving out the outliers.
+df_new <- 
+  df_new %>%
+  subset(age > low_age & age < up_age) %>%
+  subset(Income > low_income & Income < up_income)
+
+dim(df_new)
+```
+
+#### 2.1.6 Standardization and Vectorization
+```{r standlization of continuous variables}
+df_scale <- 
+  df_new %>%
+  select(Income:NumStorePurchases,age,marriage:customer_reg_days) %>%
+  scale(center = T, scale = T) %>%
+  as.data.frame()
+```
+
+```{r transform numeric variables to factors}
+# Batch_Convert_Fact <- function(df) {
+#   for(i in colnames(df)){
+#     df[i] <- as.factor(df[i])
+#   }
+#   df
+# }
+
+colApply <- function(df, cols = colnames(df), func = as.factor) {
+     df[cols] <- lapply(df[cols], func)
+     return(df)
+}
+
+df_D <- 
+  df_new %>%
+  select(-(ID:Education),-(Income:NumStorePurchases),
+         -age,-(marriage:customer_reg_days)) %>%
+  colApply()
+```
+```{r}
+df_preprocess <- 
+  cbind(df_scale,df_D)
+```
+
+#### 2.1.7 Statistics Summary
+```{r summary statistics}
+summary(df_new)
+```
+  
+  
+  
+  
+  
+### 2.2 Visualization of variables
+#### 2.2.1 Quantity distribution of purchased products  
+
+After the data preprocessing, we first explore the numerical univariate visualization and get three distribution maps.
+
+Visualise the distribution of a single continuous variable by dividing the x axis into bins and counting the number of observations in each bin. 
+Histograms (geom_histogram()) display the counts with bars; 
+Frequency polygons (geom_freqpoly()) display the counts with lines.
+
+```{r}
+df_new %>% 
+  pivot_longer(
+    cols = starts_with("Mnt")
+  ) %>% 
+  select(name, value) %>% 
+  ggplot(aes(value, fill = name)) + 
+  geom_histogram(color = brewer.pal(9,"GnBu")[9]) + 
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+  facet_wrap(vars(name), scales = "free") + 
+  scale_x_continuous(labels = scales::label_dollar()) +
+  labs(x = "Amount",
+       y = "Count", 
+       #subtitle = "Wine and Meat Have Wider Range"
+       )
+```
+
+According to Distribution of Purchased products, the purchase quantity of the products is basically the same. Meat and wine have a wider threshold than other commodities.
+  
+#### 2.2.2 Distribution of purchasing channels
+```{r}
+df_new %>% 
+  pivot_longer(
+    cols = starts_with("Num")
+  ) %>% 
+  select(name, value) %>% 
+  ggplot(aes(value, fill = name)) + 
+  geom_histogram(color = brewer.pal(9,"GnBu")[9]) + 
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+  facet_wrap(vars(name), scales = "free_y")
+```
+
+From the perspective of Distribution of purchasing channels, the proportion of customers who purchase through catalog, website and store offline channels is different, and the Distribution is also different. In general, the proportion of customers who make offline purchases is the highest, while the number of customers who make multiple purchases through the web is the largest.  
+
+#### 2.2.3 Distribution of customer purchasing behavior
+```{r}
+p6 <- 
+  df_new %>%
+  ggplot(mapping = aes(x = Income)) +
+  geom_histogram(
+    binwidth = 5000,
+    fill = brewer.pal(9,"GnBu")[5],
+    color = brewer.pal(9,"GnBu")[9], 
+    alpha = 0.7) +
+  geom_freqpoly(color = brewer.pal(9,"GnBu")[9]) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+p7 <- 
+  df_new %>%
+  ggplot(mapping = aes(x = total_spending)) +
+  geom_histogram(
+    binwidth = 100,
+    fill = brewer.pal(9,"GnBu")[6],
+    color = brewer.pal(9,"GnBu")[9], 
+    alpha = 0.7
+  ) +
+  geom_freqpoly(color = brewer.pal(9,"GnBu")[9]) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+p8 <- 
+  df_new %>%
+  ggplot(mapping = aes(x = total_purchase)) +
+  geom_histogram(
+    binwidth = 2,
+    fill = brewer.pal(9,"GnBu")[7],
+    color = brewer.pal(9,"GnBu")[9], 
+    alpha = 0.7
+  ) +
+  geom_freqpoly(color = brewer.pal(9,"GnBu")[9]) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+
+cowplot::plot_grid(p6, p7, p8, nrow = 2
+                   , labels = LETTERS[1:3]
+                   )
+```
+From the perspective of the Distribution of customer purchasing behavior, the customer's income data presents a bimodal Distribution, and the total spending show a trend of gradient decline, while the Distribution of total purchase quantity is relatively average at the third of the X-axis.
+
+
+
+### 2.3 Correlation Analysis
+#### 2.3.1 Correlation Heatmap of Continuous Variables
+After exploring the distribution of a single variable, we further searched for correlations between two or more variables.
+Two correlation Heatmaps were generated, as shown in the figure below, respectively correlation between features of original data and correlation between variables after feature engineering.
+
+```{r}
+original_data <- df_new %>%
+  select(Income:NumStorePurchases)
+
+featured_data <- df_new %>%
+  select(Income, Recency, NumDealsPurchases, age, marriage, 
+         family_size:total_spending, total_accepted:customer_reg_days)
+
+cor_1 <- cor(x = original_data)
+cor_2 <- cor(x = featured_data)
+```
+
+```{r}
+corrplot(corr=cor_1, method = "color",order = "hclust",
+         tl.cex=0.6, tl.col="black", cl.cex=0.5, number.cex = 0.5, 
+         addrect=4,addCoef.col = "grey")
+```
+```{r}
+corrplot(corr=cor_2, method = "color",order = "hclust",
+         tl.cex=0.6, tl.col="black", cl.cex=0.5, number.cex = 0.5, 
+         addrect=4,addCoef.col = "grey")
+```
+
+We can find that
+1. There is a strong positive correlation between the total purchase of the six products
+2. There is a strong positive correlation between the three purchase channels
+3. There is a strong positive correlation between the number of teenagers in a family and the number of discount products purchased
+4. There is a strong positive correlation between the customer's income, total spending and total purchase in this store
+5. There is an obvious negative correlation between the number of the customer's family and its total spending
+Correlation coefficient provides us with good intuition to explore the relationship between features.
+
+Through correlation analysis, the following three exploratory questions emerged.  
+
+
+
+#### 2.3.2 Correlation bewteen Customers and Products
+
+**How to find marketing targets through personal data?**
+
+How to find potential customers of an enterprise through personal information (that is, when customers have not yet produced consumption behavior), what personal data characteristics are closely related to its high spending, high purchase and high acceptance.
+Through regression, we visually explore all personal information data. Finally, four significant characteristics were found: family size, education level, number of registered days and customers' income.
+
+```{r}
+lm.totalspending = 
+  lm(
+    df_preprocess$total_spending ~ 
+      df_preprocess$age + 
+      df_preprocess$Education_D + 
+      df_preprocess$family_size + 
+      df_preprocess$marriage + 
+      df_preprocess$Income + 
+      df_preprocess$customer_reg_days, 
+    data = df_preprocess)
+summary(lm.totalspending)
+```
+
+```{r}
+#看离散型变量分布
+df_new %>%
+  ggplot(aes(x = factor(family_size), 
+             y = total_spending, 
+             fill = factor(family_size))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+df_new %>%
+  ggplot(aes(x = factor(family_size), 
+             y = total_purchase, 
+             fill = factor(family_size))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+df_new %>%
+  ggplot(aes(x = factor(family_size), 
+             y = total_accepted, 
+             fill = factor(family_size))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+```
+  
+  
+The more households a customer belongs to, the less he spends, buys, and receives marketing from the company.
+
+Presumably, the company's consumer product positioning is aimed at single people with high income and high education, rather than housewives who value economic benefits. 
+If hema and Lianhua supermarkets are taken as examples, the company is positioned more like Hema.  
+
+
+```{r}
+df_new %>%
+  ggplot(aes(x = factor(Education_D), 
+             y = total_spending, 
+             fill = factor(Education_D))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+df_new %>%
+  ggplot(aes(x = factor(Education_D), 
+             y = total_purchase, 
+             fill = factor(Education_D))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+df_new %>%
+  ggplot(aes(x = factor(Education_D), 
+             y = total_accepted, 
+             fill = factor(Education_D))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+```
+  
+  
+There is a positive correlation between customers' education level and their purchasing behavior data.
+
+
+
+```{r}
+ggplot(data = df_new, 
+       mapping = aes(x = customer_reg_days, y = total_spending)) +
+  geom_smooth(se = FALSE, color = brewer.pal(9,"GnBu")[6]) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+  labs(title = "The relationship between customer registion days and expenditure")
+```
+  
+  
+We find that the longer a customer signs up, the more money they spend, the more purchases they make, and the more marketing campaigns they receive.
+  
+  
+
+```{r}
+ggplot(data = df_new, 
+       mapping = aes(x = Income, y = total_spending,color = Education)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  scale_color_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+  labs(title = "The relationship between income and expenditure group by education") 
+```
+  
+  
+The higher a customer's income, the more he or she spends, buys, and accepts marketing campaigns.
+  
+  
+#### 2.3.3 Correlation between Place and Promotion
+
+**How to use consumer behavior data to find marketing targets?**
+
+After the customer has converted (that is, after the consumption behavior), what characteristics of the consumption record of customers are more likely to accept the marketing campaign.
+
+```{r}
+lm.totalaccepted = 
+  lm(
+    df_preprocess$total_accepted ~ 
+      df_preprocess$total_purchase + 
+      df_preprocess$total_spending +
+      df_preprocess$Recency + 
+      df_preprocess$Complain, 
+    data = df_preprocess)
+summary(lm.totalaccepted)
+```
+
+
+```{r}
+df_new %>%
+  ggplot(aes(x = total_purchase, 
+             y = factor(total_accepted), 
+             fill = factor(total_accepted))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+  labs(title = "The relationship between purchase and campaign accepted")
+
+df_new %>%
+  ggplot(aes(x = total_spending, 
+             y = factor(total_accepted), 
+             fill = factor(total_accepted))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+  labs(title = "The relationship between spending and campaign accepted")
+
+df_new %>%
+  ggplot(aes(x = Recency, 
+             y = factor(total_accepted), 
+             fill = factor(total_accepted))) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+  labs(title = "The relationship between recency and campaign accepted")
+```
+  
+  
+Through regression, we conducted a visual exploration of the customer's consumption behavior data and found
+1. Customers who are more receptive to marketing campaigns have less fluctuation in total purchase times(i.e., the variance of total_purchase is smaller), and customers whose total purchase times are stable between 18 and 22 times are most likely to accept marketing activities.
+2. There is a significant positive correlation between consumption amount and reception times of marketing activities, that is, total_spending and total_accepted are significantly correlated as the characteristic values of high-value customers we defined.
+3. There is no significant correlation between the number of days since a customer's last purchase and the date of data collection and marketing activities.
+
+
+#### 2.3.4 RFM Model
+
+**Identify the likelihood of customer loss**
+
+Smart marketers understand the importance of “know the customer.”
+
+Instead of simply focusing on generating more clicks, marketers must follow the paradigm shift from increased CTRs (Click-Through Rates) to retention, loyalty, and building customer relationships.
+
+Our group used the RFM model to analyze this problem.
+
+RFM analysis helps marketers find answers to the following questions:
+Who are your best customers?
+Which of your customers could contribute to your churn rate?
+Who has the potential to become valuable customers?
+Which of your customers can be retained?
+Which of your customers are most likely to respond to engagement campaigns?
+
+It can not only help determine the best customers, but can also help identify the customer consumption changes state, judge may lose customers.
+
+RFM stands for Recency, Frequency, and Monetary value, each corresponding to some key customer trait. These RFM metrics are important indicators of a customer’s behavior because frequency and monetary value affects a customer’s lifetime value, and recency affects retention, a measure of engagement. 
+
+Focus marketing on customers with high contribution and high chance of loss to recover more business opportunities is the most effective way.
+
+The RFM model sorts the customers in the three elements of the latest consumption, consumption frequency and consumption amount, assigns values to the customers in steps from 1 to 5, calculates the respective and total score of each customer, and distinguishes customers according to the scores.
+
+Here are our RFM results.
+```{r}
+rfm_df <- 
+  df_new %>%
+  select(ID,total_purchase,total_spending,Recency)
+head(rfm_df)
+```
+```{r}
+#生成RFM数据和打分
+RFM_model <-
+  rfm_table_customer(data = rfm_df,
+                     customer_id = ID,
+                     n_transactions = total_purchase,
+                     recency_days = Recency,
+                     total_revenue = total_spending) 
+```
+
+```{r}
+#提取RFM数据和RFM打分
+RFM_score_df <- RFM_model$rfm
+```
+
+```{r}
+# Visualization
+rfm_rm_plot(RFM_model, point_color = "skyblue")
+```
+
+
+We can find that for the company's consumer data, compared with the past, customers who visited recently did not generate higher revenue, which indicates that the company's products have high user stickiness.
+
+
+```{r}
+rfm_fm_plot(RFM_model,point_color = "skyblue1")
+```
+
+
+As the frequency of visits increases, so does the spending of customers, and the spending can be divided into three distinct levels. The customers who visit more frequently are the champions, loyal customers or potential loyal customers of the company, and they will generate higher revenue for the company. 
+
+
+```{r}
+rfm_heatmap(RFM_model)
+```
+
+```{r}
+rfm_bar_chart(RFM_model, bar_color = "skyblue3")
+```
+
+
+So how to find our recover customers, that is, our key marketing campagins object. It can be seen from the RFM heat chart that our marketing target should focus on the customer groups with low recency and low frequency but high monetory value, which are the customers that the company needs to focus on recovering.
+
+
+
+
+***
+
+
+## 3 Dimensionality Reduction
+
+Based on the above exploratory data analysis, we hope to conduct clustering analysis on these customers through unsupervised clustering method. Since our data involves many dimensions, in order to find the structure in the features and help achieve visualization, we use Principal Component Analysis to reduce the dimension of the data input of the subsequent clustering algorithm.
+
+### 3.1 PCA
+Principal Component Analysis (PCA) is commonly used for dimensionality reduction of high-dimensional data, and can be used to extract the main feature components of data.
+
+#### 3.1.1 Construct PCA
+```{r}
+#Running a PCA.
+data_pca <- PCA(df_scale, graph = FALSE)
+
+#Exploring PCA()
+#Getting the summary of the pca
+summary(data_pca)
+
+#Getting the variance of the first 7 new dimensions
+data_pca$eig[,2][1:7]
+
+#Getting the cummulative variance
+data_pca$eig[,3][1:7]
+```
+
+```{r eval=FALSE}
+#Getting the most correlated variables
+dimdesc(data_pca, axes = 1:2)
+
+
+#Tracing variable contributions in customers_pca
+data_pca$var$contrib
+```
+
+
+#### 3.1.2 Visualizing PCA
+**Plotting contributions of variables**
+```{r}
+#Creating a factor map for the variable contributions
+fviz_pca_var(data_pca, col.var = "contrib", gradient.cols = c("#002bbb", "#bb2e00"), repel = TRUE)
+```
+
+**Plotting Top 10 in the contributions**
+```{r}
+#Creating a factor map for the top 10 variables with the highest contributions.
+fviz_pca_var(data_pca, 
+             select.var = list(cos2 = 10),  
+             col.var = "contrib", 
+             geom.var = c("arrow","text"), 
+             gradient.cols = c("#002bbb", "#bb2e00"), 
+             repel = TRUE)
+
+
+#A lithograph shows the contribution of each principal component
+fviz_eig(data_pca,addlabels = T)
+```
+
+In this diagram, the variables close to each other are positively correlated, and those opposite are negatively correlated. The farther the arrow is from the far origin and the closer it is to the circle, the more representative it is to the principal component.
+
+
+```{r}
+#PCA sample clustering information display
+### In order to draw a graph, it is not practical to convert the total acceptance times of marketing activities into factor
+df_new <- 
+  df_new %>%
+  mutate(total_accepted_legend = as.factor(df_new$total_accepted))
+
+fviz_pca_ind(
+  data_pca,
+  geom.ind = "point",
+  col.ind = df_new$total_accepted_legend,
+  palette = c("green","yellow","blue","red","black","grey"),
+  mean.point = F,
+  addEllipses = TRUE,
+  legend.title = "Group",
+  ellipse.level = 0.95
+  )
+```
+
+**Barplotting the contributions of variables**
+```{r}
+fviz_contrib(data_pca, choice = "var", axes = 1, top = 10)
+```
+
+The red line corresponds to the expected percentage if the distributions were uniform.
+The principal component contribution diagram shows the ten variables that contribute most to principal component 1. Considering the practical significance of variables, we adopted the first ten contributing variables of principal component 1 as data input in the subsequent cluster analysis.
+  
+
+**Biplots**
+```{r}
+fviz_pca_biplot(data_pca)
+```
+
+
+***
+
+## 4 Clustering
+In this section, we will do a clustering analysis of our customers along several dimensions, which are the TOP 10 contributions of variables found in the previous PCA section. The purpose of doing cluster analysis is to help companies segment their customers and find target customers so that they can manage their customer relationships in a more targeted manner.
+
+* Steps involved in the Clustering
+  + Elbow Method to determine the number of clusters to be formed
+  + Clustering via K-Means Clustering
+  + Clustering via Agglomerative Clustering
+  + Clustering via DBSCAN Clustering
+  + Examining the clusters formed via scatter plot
+
+
+```{r Select the top 10 variables with the highest contributions}
+df_new1_scal <- 
+  df_preprocess %>%
+  select(total_spending, total_purchase, Income, NumCatalogPurchases,
+         MntMeatProducts, MntWines, NumStorePurchases, MntFishProducts,
+         Kidhome, MntSweetProducts)
+```
+
+
+### 4.1 K-Means Clustering
+#### 4.1.1 The Elbow Method
+```{r}
+tot_withinss <- map_dbl(2:10, function(k){
+  model <- kmeans(x = df_new1_scal , centers = k)
+  model$tot.withinss})
+  
+elbow_df <- data.frame(
+       k = 2:10,
+       tot_withinss = tot_withinss)
+head(elbow_df)
+```
+
+
+#### 4.1.2 plotting the elbow plot
+```{r}
+ggplot(elbow_df, aes(k, tot_withinss)) + 
+  geom_line() + 
+  scale_x_continuous(breaks = 2:10) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+```
+
+
+#### 4.1.3 Building a k-means model with a k of 5
+```{r}
+customers_md <- kmeans(df_new1_scal , center = 5)
+clust_customers <- 
+  df_new1_scal %>% 
+  mutate(cluster_num = as.factor(customers_md$cluster))
+
+segment_customers <- mutate(df_new1_scal, cluster = clust_customers)
+
+standard1 <- 
+  df_new1_scal %>% 
+  mutate(cluster = segment_customers$cluster)
+```
+
+
+
+### 4.2 Hierarchical Clustering
+We will first be performing clustering via Agglomerative clustering.  
+Agglomerative clustering is a hierarchical clustering method.  
+It involves merging examples until the desired number of clusters is achieved.  
+
+#### 4.2.1 Agglomerative clustering
+```{r}
+hc <- hclust(dist(df_new1_scal, method = "euclidean"), method = "ward.D2")
+result <- cutree(hc, k=3)
+clust_hc <- as.data.frame(result)
+
+df_new2 <- mutate(df_new, cluster_num = as.factor(clust_hc$result))
+
+count(df_new2, cluster_num)
+plot(hc, hang = -0.01, cex = 0.7)
+```
+
+From the graph of the results of the hierarchical clustering method, it is reasonable to choose to cluster into three categories.
+
+
+### 4.3 DBSCAN
+
+Finally, we use the DBSCAN clustering method. DBSCAN is a typical density clustering algorithm that can be applied to both convex and non-convex sample sets, in contrast to K-Means and BIRCH, which are generally only applicable to convex sample sets. By grouping closely related samples into one category, we obtain a clustering category. By classifying all closely related groups into different categories, we obtain the final results for all clustering categories.
+
+```{r}
+db <- dbscan(df_new1_scal, eps = 0.30, MinPts = 7, scale = FALSE)
+clust_db <- as.data.frame(db$cluster)
+
+##Plotting the clusters
+fviz_cluster(db, df_new1_scal, stand = FALSE, frame = FALSE, geom = "point")
+```
+
+As we can see from the dot plot above.One category has a very huge number of values and the remaining two categories have very few values which do not achieve good clustering.  
+
+
+***
+
+
+## 5 Evaluating
+### 5.1 silhouette coefficient
+
+Silhouette Coefficient is a means of evaluating the clustering effect. Silhouette Coefficient ∈[-1, 1].
+
+```{r}
+##silhouette coefficient
+customers_md <- kmeans(df_new1_scal , center = 5)
+stats1 <- cluster.stats(dist(df_new1_scal)^2, customers_md$cluster)
+sil1 <- stats1$avg.silwidth
+sil1
+
+stats2 <- cluster.stats(dist(df_new1_scal)^2, result)
+sil2 <- stats2$avg.silwidth
+sil2
+
+stats3 <- cluster.stats(dist(df_new1_scal)^2, db$cluster)
+sil3 <- stats3$avg.silwidth
+sil3
+```
+
+From the results, SC(Hierarchical) > SC (K-means) >SC(DBSCAN), we choose Hierarchical as the final classification method.
+
+
+***
+
+
+## 6 Cluster Visulization
+
+The purpose of this section is to study the patterns in the clusters formed and determine the nature of the clusters' patterns.
+
+For that, we will be having a look at the data in light of clusters via exploratory data analysis and drawing conclusions.
+
+Firstly, let us have a look at the group distribution of clustering
+
+### 6.1 Statistical analysis of clusters
+```{r}
+#描述性统计图
+ggplot(data = df_new2) + geom_bar(mapping = aes(x = cluster_num, fill = cluster_num))+
+  theme_light()+scale_fill_brewer(palette = "GnBu")
+```
+
+The clusters seem to be unfairly distributed.  
+
+
+```{r}
+p <- plot_ly(df_new2, x = ~total_accepted, y = ~total_spending, z = ~total_purchase, color = ~ cluster_num,
+               colors = c("#FF6DAE","#D4CA3A","#00BDFF"),
+               marker = list(size = 5)) %>% add_markers()
+p
+```
+
+This scatter chart shows the situation of three types of customer service from three dimensions, total_ purchase , total_spending and total_accepted.
+
+
+### 6.2 Statistical analysis of univariate with clusters
+
+```{r}
+#单变量
+ggplot(data = df_new2, 
+       mapping = aes(x = cluster_num, y = total_spending, fill = cluster_num)) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_light() +
+  geom_boxplot()
+```
+
+we can see from the box plot that the cluster_1 has the max mean value of "total_spending" while the cluster_2 has the min mean value.
+
+
+```{r}
+df_new2 %>% 
+  ggplot(aes(total_purchase, fill = cluster_num)) + 
+  geom_histogram(color = "black") + 
+  facet_wrap(vars(cluster_num)) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_light()
+```
+
+Although the cluster_2 reaches the peak when the "total_purchase" is near "5", much higher than the other two clusters, there is almost no value when the "total_purchase">20. The distribution of cluster_3 is similar to a normal distribution with a midpoint at 20. This indicates that the purchasing power of people in cluster_2 is not strong. Although there are fewer people in the cluster_3, it is obvious that the cluster_3  has more buying power.
+
+Then, we want to know the patterns of consumption of the products of the three clusters.
+
+```{r}
+ggplot(data = df_new2, 
+       aes(x = cluster_num, y = MntMeatProducts, fill = cluster_num)) +
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()+
+  geom_violin()
+```
+
+
+```{r}
+df_new2 %>% 
+  ggplot(aes(MntWines, fill = cluster_num)) + 
+  geom_histogram(color = "black") + 
+  facet_wrap(vars(cluster_num)) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_light()
+```
+
+```{r}
+df_new2 %>% 
+  ggplot(aes(MntFishProducts, fill = cluster_num)) + 
+  geom_histogram(color = "black") + 
+  facet_wrap(vars(cluster_num)) +
+  scale_fill_brewer(palette = "GnBu") +
+  theme_light()
+```
+
+```{r}
+df_new2 %>% ggplot(aes(MntFruits, fill = cluster_num)) + geom_histogram(color = "black") + facet_wrap(vars(cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()
+```
+
+```{r}
+df_new2 %>% ggplot(aes(MntSweetProducts, fill = cluster_num)) + geom_histogram(color = "black") + facet_wrap(vars(cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()
+```
+
+```{r}
+df_new2 %>% ggplot(aes(MntGoldProds, fill = cluster_num)) + geom_histogram(color = "black") + facet_wrap(vars(cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()
+```
+
+From the patterns of consumption of the products, we can find that purchasing power of people in cluster_2 is not strong and cluster_1  has more buying power.
+
+
+```{r}
+ggplot(data = df_new2, mapping = aes(x = cluster_num, y = Income, fill = cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()+
+  geom_boxplot()
+```
+The overall income of cluster_2 is lowest. The overall income of cluster_1 is highest. Cluster_3 has a middle income, which is above middle.
+
+
+
+```{r}
+ggplot(data = df_new2, mapping = aes(x = cluster_num, y = family_size, color = cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()+
+  geom_jitter()
+```
+
+From the patterns, we can find that cluster 2 has the largest number of people in multi-person families (family size >=3); The family size of cluster 1 is mainly concentrated between 1 and 3, which has an average distribution; The family size of cluster 1 is mainly concentrated between 2 and 3,and single-person households are rare in cluster 3.
+
+```{r}
+ggplot(data = df_new2, mapping = aes(x = cluster_num, y = total_accepted, color = cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()+
+  geom_jitter()
+```
+
+From the "total_accepted--cluster_num" plot, we can draw a conclusion that Cluster 1 has the largest number of people receiving multiple discount offers. This indicates that the people in cluster 1 are more willing to accept the discount offers; Most people in cluster 2 and 3 don’ t accepted discount offers or just accepted once.
+
+```{r Channels}
+df_new2 %>% ggplot(aes(NumStorePurchases, fill = cluster_num)) + geom_histogram(color = "black") + facet_wrap(vars(cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()
+
+df_new2 %>% ggplot(aes(NumCatalogPurchases, fill = cluster_num)) + geom_histogram(color = "black") + facet_wrap(vars(cluster_num))+
+  scale_fill_brewer(palette = "GnBu")+
+  theme_light()
+```
+
+From the patterns, we can find that people in cluster_1 and cluster_3 is more willing  to buy products in stores offline. 
+
+
+
+
+### 6.3 Statistical analysis of bivariate with clusters
+
+```{r}
+#双变量
+df_new2 %>% 
+  ggplot(aes(x=Income, y=total_spending, color = cluster_num)) + 
+  geom_point(alpha=0.5,size=2)+
+  theme_light()+
+  scale_color_brewer(palette = "GnBu")
+```
+
+We can find that cluster 1 and cluster 3 spend more with the same income.
+
+```{r}
+df_new2 %>% 
+  ggplot(aes(x=MntWines,y=total_spending,color = cluster_num)) + 
+  geom_point(alpha=0.5,size=2)+theme_light()+
+  scale_color_brewer(palette = "GnBu")
+```
+
+It is intersting to find that cluster 3 are more willing to buy more wine with the same total spending.
+
+
+```{r Cluster 2 with most kids are not willing to buy more meat and sweet products.}
+df_new2 %>% 
+  ggplot(aes(x=Kidhome,y=MntMeatProducts,fill = cluster_num)) + 
+  geom_boxplot()+theme_light()+
+  scale_fill_brewer(palette = "GnBu")
+
+df_new2 %>% 
+  ggplot(aes(x=Kidhome,y=MntSweetProducts,fill = cluster_num)) + 
+  geom_boxplot()+theme_light()+
+  scale_fill_brewer(palette = "GnBu")
+
+```
+
+Common sense dictates that having more children in cluster_2 will boost their consumption of meat and sweets, while 2luster 2 with most kids are not willing to buy more meat and sweet productions.
+
+
+***
+
+
+## 7 Conclusion
+
+#### 7.1 Three Clusters Personality  
+
+* Cluster_1
+  +The number of people is medium in this sample;
+  +But they have the highest average income and average spend, and are the company's most valuable potential customers;
+  +Visit offline shops more frequently, have a better overall acceptance of the company's marketing activities;
+  +Spend more evenly on each product category, and buy the highest number of high-value products such as gold and jewellery.
+
+* Cluster_2
+  +The largest number of people in this sample;
+  +But whose average income and average consumption are the lowest, are the customers in the company's sinking market;
+  +Who have little purchasing power and a high number of children in the household, but do not have a hard sting to increase their consumption in desserts and meat injuries;
+  +Cluster_2 also has the potential to create greater value than the other two categories, according to the long tail effect.
+  
+* Cluster_3
+  +The smallest number of people in this sample are similar to but weaker than cluster_1 in terms of income and consumption;
+  +They have the potential and tendency to move towards cluster_1 in terms of consumption behavior;
+  +Most of them do not have children, they prefer the consumption of alcoholic products, they perform above cluster_1 in terms of consumption of alcoholic products, and they prefer offline shopping.
+  
+#### 7.2 Two Promblems  
+
+* Channel
+The frequency of online consumption in all three clusters is not high, probably because the company's online mall is not well built, so the company still needs to actively expand its online channels.
+* Promotion
+We found that all three clusters of consumers are not very acceptive to marketing activities. The company has not played the role of promotion well, probably because the marketing activities themselves are not attractive enough, so the business has to improve their marketing campaign design.
+
+#### 7.3 Strategic Decisions
+
+##### 7.3.1 General
+We believe that custer_1 and cluster_2 cannot be consumed within one pool and that they need to be differentiated and set up in different lines of business.  
+
+Create sub-brands that target different users.
+
+##### 7.3.2 Strategic
+* Cluster_1
+  +Cluster_1 currently have a greater ability to create value, but the number of people in this category is not at a satisfactory level, which we believe is a result of the previous undifferentiated marketing to customers by companies;
+  +Promotions: Marketing of high value products to promote their purchase of higher priced products and increased promotion of gold and silver jewellery products;
+  +Channels: Set up a membership card vip mechanism for offline shops.
+
+* Cluster_2
+  +Cluster_2 currently has the highest number of people, but not much purchasing power. The company needs to capitalise on baseline of consumers in this category, whose current low purchasing power is likely to be due to the high price of the product;
+  +Promotions: Promotion of low-priced products, children's products and increased family bundle sales;
+  +Channels: Online business for this category of users.
+
+* Cluster_3
+  +Cluster_3 is the category in the middle, but it is also the category most likely to be nurtured into clustre_1, as their consumer behaviour is similar to that of clustre_1, so companies have to work hard to attract such consumers into the clustre_1 line of business;
+  +Promotions: Additional promotions on alcohol products can be targeted at this group of consumers, etc;
+  +Channels: Set up a membership card vip mechanism for offline shops.
+
+
+## 8 Cooperation
+* From 0 to 3: WEI Zhen, YUAN Siqin
+  + In this part we discussed and sorted out the analytical logic and framework of this part together, a reasonable division of labor was carried out.
+  + WEI Zhen writed codes except PCA, responsible for speech writing and presentation.
+  + Yuan Siqin writed the PCA code and helped write other codes with WEI Zhen, responsible for PPT production and document integration.
+  
+* From 4 to 7: ZHU Difei, WU qiuyan
+  + Zhu Difei: Hierarchical Clustering, DBSCAN, visualization of univariate with clusters, responsible for speech writing,  presentation, PPT production and document integration of this part.
+  + Wu qiuyan: K-means clustering, Evaluation, visualization of bivariate with clusters.
+  + Find the business information together.
+
+
+
